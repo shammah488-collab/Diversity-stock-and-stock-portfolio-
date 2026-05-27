@@ -568,8 +568,11 @@ async function _sm(){await fbSet('messages',DB.messages);}
 
 // Poll every 8s so manager sees new registrations live
 let _poll=null;
+let _seenPending=new Set();
 function startPolling(){
   if(_poll)clearInterval(_poll);
+  // Seed seen set with already-known pending users so we don't toast on login
+  _seenPending=new Set((DB.pendingUsers||[]).map(u=>u.id));
   _poll=setInterval(async()=>{
     if(!currentUser)return;
     const [investors,pending,notifs,msgs]=await Promise.all([
@@ -581,6 +584,14 @@ function startPolling(){
     if(msgs&&typeof msgs==='object'&&!Array.isArray(msgs))DB.messages=msgs;
     updateNotifBadge();
     if(currentUser.role==='manager'){
+      // Fire toast for any new pending users that arrived while manager is logged in
+      (DB.pendingUsers||[]).forEach(u=>{
+        if(!_seenPending.has(u.id)){
+          _seenPending.add(u.id);
+          showApprovalToast(u);
+          addNotif(`New account request from ${u.name} (${u.email}) — awaiting your approval.`,'approval');
+        }
+      });
       const ap=document.querySelector('.page.active');
       if(ap){
         if(ap.id==='mgInvestors')renderInvestorTable();
