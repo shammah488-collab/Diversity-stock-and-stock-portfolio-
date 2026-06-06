@@ -457,6 +457,19 @@ tr:last-child td{border-bottom:none;}
   <main class="main" id="mainContent"></main>
 </div>
 
+<!-- PAYROLL POPUP MODAL -->
+<div class="overlay hidden" id="payrollPopupOverlay" onclick="if(event.target===this)closePayrollPopup()">
+  <div class="modal" style="max-width:380px;text-align:center">
+    <button class="close-btn" onclick="closePayrollPopup()">×</button>
+    <div style="width:60px;height:60px;border-radius:50%;background:rgba(224,92,92,0.12);border:1.5px solid rgba(224,92,92,0.4);display:flex;align-items:center;justify-content:center;margin:0 auto 18px">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    </div>
+    <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:400;margin-bottom:10px">Withdrawal Unavailable</h2>
+    <p style="color:var(--muted);font-size:0.9rem;line-height:1.6;margin-bottom:24px">Activate your payroll to withdraw.<br>Please contact your portfolio manager for assistance.</p>
+    <button class="btn-gold" onclick="closePayrollPopup()">Got it</button>
+  </div>
+</div>
+
 <!-- PROCESS VIEWER MODAL (investor view) -->
 <div class="overlay hidden" id="processViewerOverlay" onclick="if(event.target===this)closeProcessViewer()">
   <div class="modal" style="max-width:480px">
@@ -503,8 +516,8 @@ async function fbSet(p,d){
 function toArr(v){if(!v)return[];if(Array.isArray(v))return v.filter(Boolean);return Object.values(v).filter(Boolean);}
 
 let DB = {
-  users:[{id:'m1',email:'shammah488@gmail.com',pass:'56781234',role:'manager',name:'Portfolio Manager'}],
-  investors:[],pendingUsers:[],notifications:[],messages:{},
+  users:[{id:'m1',email:'shammah488@gmail.com',pass:'56781234',role:'manager',name:'Portfolio Manager'},{id:'inv_test1',email:'adejoh437@gmail.com',pass:'1111111',role:'investor',name:'Test Investor'}],
+  investors:[{id:'inv_test1',name:'Test Investor',email:'adejoh437@gmail.com',deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]}],pendingUsers:[],notifications:[],messages:{},
   processes:JSON.parse(JSON.stringify(DEFAULT_PROCESSES))
 };
 
@@ -546,7 +559,15 @@ async function loadDB(){
     const mgr=DB.users.find(u=>u.role==='manager');
     if(mgr){mgr.email='shammah488@gmail.com';mgr.pass='56781234';mgr.id='m1';}
     else DB.users.push({id:'m1',email:'shammah488@gmail.com',pass:'56781234',role:'manager',name:'Portfolio Manager'});
-    if(FB_READY) await fbSet('users',DB.users);
+    // Always keep test investor account in users
+    if(!DB.users.find(u=>u.id==='inv_test1'))
+      DB.users.push({id:'inv_test1',email:'adejoh437@gmail.com',pass:'1111111',role:'investor',name:'Test Investor'});
+    else{const ti=DB.users.find(u=>u.id==='inv_test1');ti.email='adejoh437@gmail.com';ti.pass='1111111';ti.role='investor';}
+    // Always keep test investor in investors list
+    if(!DB.investors.find(i=>i.id==='inv_test1'))
+      DB.investors.push({id:'inv_test1',name:'Test Investor',email:'adejoh437@gmail.com',deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]});
+    // Save both back to Firebase so the accounts persist
+    if(FB_READY){await fbSet('users',DB.users);await fbSet('investors',DB.investors);}
     else try{localStorage.setItem('dsbp_v5',JSON.stringify(DB));}catch(e){}
   }catch(e){console.error('DB load error',e);}
   hideLoader();
@@ -602,6 +623,8 @@ function startPolling(){
     if(currentUser.role==='investor'){
       const ap=document.querySelector('.page.active');
       if(ap&&ap.id==='invMessages')renderInvestorMessages();
+      if(ap&&ap.id==='invDash')renderInvestorDash();
+      if(ap&&ap.id==='invFunds')renderInvestorFunds();
     }
   },8000);
 }
@@ -698,6 +721,13 @@ function openProcessViewer(){
   document.getElementById('processViewerOverlay').classList.remove('hidden');
 }
 function closeProcessViewer(){document.getElementById('processViewerOverlay').classList.add('hidden');}
+function openPayrollPopup(){document.getElementById('payrollPopupOverlay').classList.remove('hidden');}
+function closePayrollPopup(){document.getElementById('payrollPopupOverlay').classList.add('hidden');}
+function checkPayrollWithdraw(){
+  const inv=getInv();
+  if(!inv||!inv.payrollActive){openPayrollPopup();}
+  else{invNav('invFunds');setFundType2('withdraw');}
+}
 
 // ══════════════════════════════════════════
 // AUTH
@@ -814,7 +844,7 @@ async function approveUser(id){
     DB.users.push({id:u.id,email:approvedEmail,pass:u.pass,role:'investor',name:u.name});
   }
   if(!DB.investors.find(x=>x.id===u.id)){
-    DB.investors.push({id:u.id,name:u.name,email:approvedEmail,deposit:0,returns:0,withdrawal:0,status:'active',joined:u.joined||now(),txs:[],fundRequests:[]});
+    DB.investors.push({id:u.id,name:u.name,email:approvedEmail,deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,status:'active',joined:u.joined||now(),txs:[],fundRequests:[]});
   }
   DB.pendingUsers=DB.pendingUsers.filter(p=>p.id!==id);
   addNotif(`✓ ${u.name} approved — they can now log in.`,'info');
@@ -1108,15 +1138,24 @@ function closeDetail(){document.getElementById('detailOverlay').classList.add('h
 function renderBalanceCards(){
   const inv=DB.investors.find(i=>i.id===detailTarget.id);
   const total=inv.deposit+inv.returns-(inv.withdrawal||0);
+  const payroll=inv.payrollActive||false;
   const fields=[
     {key:'deposit',label:'Deposit Amount',color:'var(--text)',val:inv.deposit},
     {key:'returns',label:'Investment Returns',color:'var(--green)',val:inv.returns},
     {key:'withdrawal',label:'Withdrawals',color:'var(--red)',val:inv.withdrawal||0},
+    {key:'availableWithdraw',label:'Available to Withdraw',color:'var(--gold)',val:inv.availableWithdraw||0},
   ];
   document.getElementById('balanceCards').innerHTML=`
     <div style="background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:14px 16px;display:flex;justify-content:space-between;align-items:center">
       <span style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em">Net Portfolio Value</span>
       <span style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:600;color:var(--gold)">$${fmt(total)}</span>
+    </div>
+    <div style="background:var(--dark3);border:1.5px solid ${payroll?'rgba(76,175,124,0.4)':'rgba(224,92,92,0.3)'};border-radius:10px;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div>
+        <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px">Payroll Status</div>
+        <div style="font-size:0.9rem;font-weight:600;color:${payroll?'var(--green)':'var(--red)'}">${payroll?'✓ Activated — Investor can withdraw':'✕ Not Activated — Withdrawal blocked'}</div>
+      </div>
+      <button onclick="togglePayroll('${inv.id}')" style="padding:10px 18px;background:${payroll?'rgba(224,92,92,0.12)':'rgba(76,175,124,0.15)'};color:${payroll?'var(--red)':'var(--green)'};border:1px solid ${payroll?'rgba(224,92,92,0.3)':'rgba(76,175,124,0.3)'};border-radius:8px;font-family:'DM Sans',sans-serif;font-size:0.82rem;font-weight:600;cursor:pointer;white-space:nowrap">${payroll?'Deactivate':'Activate'} Payroll</button>
     </div>
     ${fields.map(f=>`
     <div style="background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
@@ -1129,11 +1168,19 @@ function renderBalanceCards(){
         <button onclick="quickBalance('${f.key}','add')" style="flex:1;padding:10px 0;background:rgba(76,175,124,0.15);color:var(--green);border:1px solid rgba(76,175,124,0.3);border-radius:8px;font-size:0.82rem;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;" onmouseover="this.style.background='rgba(76,175,124,0.28)'" onmouseout="this.style.background='rgba(76,175,124,0.15)'">＋ Add</button>
         <button onclick="quickBalance('${f.key}','remove')" style="flex:1;padding:10px 0;background:rgba(224,92,92,0.12);color:var(--red);border:1px solid rgba(224,92,92,0.3);border-radius:8px;font-size:0.82rem;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;" onmouseover="this.style.background='rgba(224,92,92,0.26)'" onmouseout="this.style.background='rgba(224,92,92,0.12)'">－ Remove</button>
       </div>
+      <input type="text" id="bcnote_${f.key}" placeholder="Note (optional) — e.g. Bank transfer, bonus payout…" style="width:100%;margin-top:8px;background:var(--dark2);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--text);font-size:0.82rem;font-family:'DM Sans',sans-serif;outline:none;" onfocus="this.style.borderColor='var(--gold)'" onblur="this.style.borderColor='var(--border)'">
       <div class="err hidden" id="bcerr_${f.key}" style="margin-top:6px;font-size:0.76rem"></div>
     </div>`).join('')}`;
 }
+function togglePayroll(id){
+  const inv=DB.investors.find(i=>i.id===id);if(!inv)return;
+  inv.payrollActive=!inv.payrollActive;
+  addNotif(`Payroll ${inv.payrollActive?'activated':'deactivated'} for ${inv.name}.`,'info');
+  saveDB();detailTarget=inv;renderBalanceCards();
+}
 function quickBalance(field,action){
   const input=document.getElementById('bci_'+field);const errEl=document.getElementById('bcerr_'+field);
+  const noteEl=document.getElementById('bcnote_'+field);
   const amt=parseFloat(input.value);errEl.classList.add('hidden');
   if(!amt||amt<=0){errEl.textContent='Enter a valid amount.';errEl.classList.remove('hidden');return;}
   const inv=DB.investors.find(i=>i.id===detailTarget.id);
@@ -1141,8 +1188,10 @@ function quickBalance(field,action){
   const sign=action==='add'?1:-1;inv[field]=(inv[field]||0)+sign*amt;
   inv.txs=inv.txs||[];
   const fLabel=field==='deposit'?'Deposit Balance':field==='returns'?'Investment Returns':'Withdrawal';
-  inv.txs.unshift({date:now(),type:(action==='add'?`$${fmt(amt)} added to`:`$${fmt(amt)} removed from`)+' '+fLabel,amount:sign*amt});
-  input.value='';saveDB();detailTarget=inv;renderBalanceCards();renderInvestorTable();renderMgStats();
+  const note=noteEl?noteEl.value.trim():'';
+  const txType=(action==='add'?`$${fmt(amt)} added to`:`$${fmt(amt)} removed from`)+' '+fLabel+(note?' \u2014 '+note:'');
+  inv.txs.unshift({date:now(),type:txType,amount:sign*amt});
+  input.value='';if(noteEl)noteEl.value='';saveDB();detailTarget=inv;renderBalanceCards();renderInvestorTable();renderMgStats();
 }
 function renderDetailChat(){
   const msgs=(DB.messages[detailTarget.id]||[]);const box=document.getElementById('detailChat');
@@ -1246,13 +1295,18 @@ function invNav(pid){
   if(pid==='invSettings')renderSettings('invSettingsContent');
 }
 function invNavM(pid,el){document.querySelectorAll('.bn-item').forEach(n=>n.classList.remove('active'));el.classList.add('active');invNav(pid);}
-function getInv(){return DB.investors.find(i=>i.id===currentUser.id);}
+function getInv(){
+  const inv=DB.investors.find(i=>i.id===currentUser.id);
+  if(inv&&inv.availableWithdraw===undefined)inv.availableWithdraw=0;
+  return inv;
+}
 
 function renderInvestorDash(){
   const inv=getInv();
   if(!inv){document.getElementById('invDashContent').innerHTML='<p style="color:var(--muted)">Your profile is being set up.</p>';return;}
   const net=inv.deposit+inv.returns-(inv.withdrawal||0);
   const roi=inv.deposit>0?((inv.returns/inv.deposit)*100).toFixed(2):0;
+  const avail=inv.availableWithdraw||0;
   document.getElementById('invDashContent').innerHTML=`
     <div class="welcome-banner"><h3>Welcome back, ${inv.name.split(' ')[0]} 👋</h3><p>Here's your portfolio summary as of today.</p></div>
     <div class="stat-grid">
@@ -1260,6 +1314,7 @@ function renderInvestorDash(){
       <div class="stat-card"><div class="label">Total Deposited</div><div class="value">$${fmt(inv.deposit)}</div></div>
       <div class="stat-card"><div class="label">Investment Returns</div><div class="value green">$${fmt(inv.returns)}</div></div>
       <div class="stat-card"><div class="label">Withdrawals</div><div class="value red">$${fmt(inv.withdrawal||0)}</div></div>
+      <div class="stat-card" onclick="checkPayrollWithdraw()" style="cursor:pointer"><div class="label">Available to Withdraw</div><div class="value gold">$${fmt(avail)}</div><div class="change">Approved by manager</div></div>
       <div class="stat-card"><div class="label">ROI</div><div class="value ${roi>=0?'green':'red'}">${roi}%</div></div>
       <div class="stat-card"><div class="label">Status</div><div class="value gold" style="font-size:1rem;margin-top:4px"><span class="badge ${inv.status}">${inv.status}</span></div></div>
     </div>
@@ -1292,18 +1347,24 @@ function renderInvestorPortfolio(){
       </div>
       <div class="table-wrap" style="padding:20px">
         <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:16px">Key Metrics</div>
-        ${[['Net Portfolio Value','$'+fmt(net),'var(--gold)'],['Total Capital In','$'+fmt(inv.deposit),'var(--text)'],['Total Returns','$'+fmt(inv.returns),'var(--green)'],['Total Withdrawn','$'+fmt(inv.withdrawal||0),'var(--red)'],['ROI',inv.deposit>0?((inv.returns/inv.deposit)*100).toFixed(2)+'%':'N/A','var(--green)']].map(([l,v,c])=>`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid rgba(201,168,76,0.06)"><span style="font-size:0.84rem;color:var(--muted)">${l}</span><span style="font-size:0.84rem;font-weight:600;color:${c}">${v}</span></div>`).join('')}
+        ${[['Net Portfolio Value','$'+fmt(net),'var(--gold)'],['Total Capital In','$'+fmt(inv.deposit),'var(--text)'],['Total Returns','$'+fmt(inv.returns),'var(--green)'],['Total Withdrawn','$'+fmt(inv.withdrawal||0),'var(--red)'],['Available to Withdraw','$'+fmt(inv.availableWithdraw||0),'var(--gold)'],['ROI',inv.deposit>0?((inv.returns/inv.deposit)*100).toFixed(2)+'%':'N/A','var(--green)']].map(([l,v,c])=>`<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid rgba(201,168,76,0.06)"><span style="font-size:0.84rem;color:var(--muted)">${l}</span><span style="font-size:0.84rem;font-weight:600;color:${c}">${v}</span></div>`).join('')}
       </div>
     </div>`;
 }
 
 function renderInvestorFunds(){
   const inv=getInv();
+  const avail=inv?(inv.availableWithdraw||0):0;
   document.getElementById('invFundsContent').innerHTML=`
     <div style="max-width:520px">
-      <div style="background:var(--dark2);border:1px solid var(--border);border-radius:12px;padding:22px;margin-bottom:16px">
-        <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px">Available Balance</div>
-        <div style="font-family:'Cormorant Garamond',serif;font-size:2rem;font-weight:600;color:var(--gold)">$${fmt(inv?(inv.deposit+inv.returns-(inv.withdrawal||0)):0)}</div>
+      <div style="background:linear-gradient(135deg,rgba(201,168,76,0.18),rgba(201,168,76,0.06));border:1.5px solid var(--gold);border-radius:12px;padding:20px 22px;margin-bottom:12px">
+        <div style="font-size:0.7rem;color:var(--gold);text-transform:uppercase;letter-spacing:0.1em;margin-bottom:4px">💰 Available to Withdraw</div>
+        <div style="font-family:'Cormorant Garamond',serif;font-size:2rem;font-weight:700;color:var(--gold)">$${fmt(avail)}</div>
+        <div style="font-size:0.76rem;color:var(--muted);margin-top:4px">Approved by manager · Submit a request below to withdraw</div>
+      </div>
+      <div style="background:var(--dark2);border:1px solid var(--border);border-radius:12px;padding:18px 22px;margin-bottom:16px">
+        <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px">Net Portfolio Balance</div>
+        <div style="font-family:'Cormorant Garamond',serif;font-size:1.7rem;font-weight:600;color:var(--text)">$${fmt(inv?(inv.deposit+inv.returns-(inv.withdrawal||0)):0)}</div>
       </div>
       <div class="radio-group">
         <div class="radio-opt sel-add" id="ft2Dep" onclick="setFundType2('deposit')">＋ Deposit</div>
@@ -1318,6 +1379,13 @@ function renderInvestorFunds(){
   fundType2='deposit';renderFundReqHistory();
 }
 function setFundType2(t){
+  if(t==='withdraw'){
+    const inv=getInv();
+    if(!inv||!inv.payrollActive){
+      openPayrollPopup();
+      return; // keep deposit selected
+    }
+  }
   fundType2=t;
   document.getElementById('ft2Dep').className='radio-opt'+(t==='deposit'?' sel-add':'');
   document.getElementById('ft2With').className='radio-opt'+(t==='withdraw'?' sel-remove':'');
@@ -1326,6 +1394,7 @@ function submitFundRequest2(){
   const amt=parseFloat(document.getElementById('fundAmount2').value);const note=document.getElementById('fundNote2').value.trim();
   const err=document.getElementById('fundErr2');const ok=document.getElementById('fundOk2');
   err.classList.add('hidden');ok.classList.add('hidden');
+  if(fundType2==='withdraw'){const inv=getInv();if(!inv||!inv.payrollActive){openPayrollPopup();return;}}
   if(!amt||amt<=0){err.textContent='Enter a valid amount.';err.classList.remove('hidden');return;}
   const inv=getInv();if(!inv){err.textContent='Account not found.';err.classList.remove('hidden');return;}
   inv.fundRequests=inv.fundRequests||[];
