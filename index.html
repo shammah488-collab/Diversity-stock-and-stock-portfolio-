@@ -590,10 +590,19 @@ async function _sm(){await fbSet('messages',DB.messages);}
 // Poll every 8s so manager sees new registrations live
 let _poll=null;
 let _seenPending=new Set();
+let _seenMsgCount={};   // track message counts per investor thread
 function startPolling(){
   if(_poll)clearInterval(_poll);
   // Seed seen set with already-known pending users so we don't toast on login
   _seenPending=new Set((DB.pendingUsers||[]).map(u=>u.id));
+  // Seed message counts so we don't notify on messages already read at login
+  if(currentUser){
+    if(currentUser.role==='manager'){
+      Object.keys(DB.messages).forEach(invId=>{_seenMsgCount[invId]=(DB.messages[invId]||[]).length;});
+    } else {
+      _seenMsgCount[currentUser.id]=(DB.messages[currentUser.id]||[]).length;
+    }
+  }
   _poll=setInterval(async()=>{
     if(!currentUser)return;
     const [investors,pending,notifs,msgs]=await Promise.all([
@@ -613,14 +622,47 @@ function startPolling(){
           addNotif(`New account request from ${u.name} (${u.email}) — awaiting your approval.`,'approval');
         }
       });
+      // Check for new investor messages
+      Object.keys(DB.messages).forEach(invId=>{
+        const thread=DB.messages[invId]||[];
+        const prev=_seenMsgCount[invId]||0;
+        const newMsgs=thread.slice(prev).filter(m=>m.from==='investor');
+        if(newMsgs.length>0){
+          const inv=DB.investors.find(i=>i.id===invId);
+          const name=inv?inv.name:invId;
+          newMsgs.forEach(m=>{
+            sendPushNotif('💬 New Message — DSBP',`${name}: ${m.text}`,'dsbp-mgr-msg-'+invId);
+          });
+          // In-app notification dot
+          addNotif(`New message from ${name}.`,'msg');
+        }
+        _seenMsgCount[invId]=thread.length;
+      });
       const ap=document.querySelector('.page.active');
       if(ap){
         if(ap.id==='mgInvestors')renderInvestorTable();
         if(ap.id==='mgPending')renderPending();
         if(ap.id==='mgOverview')renderMgStats();
       }
+      // Refresh open investor chat
+      if(detailTarget){renderDetailChat();}
     }
     if(currentUser.role==='investor'){
+      const thread=DB.messages[currentUser.id]||[];
+      const prev=_seenMsgCount[currentUser.id]||0;
+      const newMsgs=thread.slice(prev).filter(m=>m.from==='manager');
+      if(newMsgs.length>0){
+        newMsgs.forEach(m=>{
+          sendPushNotif('💬 Message from Your Manager — DSBP',m.text,'dsbp-inv-notif');
+        });
+        addNotif(`You have ${newMsgs.length} new message${newMsgs.length>1?'s':''} from your manager.`,'msg');
+        updateNotifBadge();
+      }
+      _seenMsgCount[currentUser.id]=thread.length;
+      // Clear pending notifs from investor record (already processed)
+      const inv=DB.investors.find(i=>i.id===currentUser.id);
+      if(inv&&inv.pendingMsgNotif&&inv.pendingMsgNotif.length){
+        inv.pendingMsgNotif=[];await _si();}
       const ap=document.querySelector('.page.active');
       if(ap&&ap.id==='invMessages')renderInvestorMessages();
       if(ap&&ap.id==='invDash')renderInvestorDash();
@@ -648,6 +690,29 @@ function fmt(n){if(!n&&n!==0)return'0.00';return Number(n).toLocaleString('en-US
 function addNotif(msg,type='info'){
   DB.notifications.unshift({id:'n'+Date.now(),msg,type,read:false,date:now()});
   _sn();updateNotifBadge();
+}
+
+// ── PUSH NOTIFICATIONS (browser native) ──
+async function requestNotifPermission(){
+  if(!('Notification' in window))return;
+  if(Notification.permission==='default'){
+    await Notification.requestPermission();
+  }
+}
+function sendPushNotif(title,body,tag){
+  if(!('Notification' in window)||Notification.permission!=='granted')return;
+  try{
+    const n=new Notification(title,{
+      body,
+      tag:tag||'dsbp-msg',
+      icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="%230A0C0F"/><rect x="8" y="16" width="48" height="8" rx="2" fill="%23C9A84C"/><rect x="8" y="28" width="32" height="8" rx="2" fill="%23C9A84C"/><rect x="8" y="40" width="36" height="8" rx="2" fill="%23C9A84C"/></svg>',
+      badge:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="%23C9A84C"/></svg>',
+      requireInteraction:false,
+      silent:false
+    });
+    n.onclick=()=>{window.focus();n.close();};
+    setTimeout(()=>n.close(),8000);
+  }catch(e){}
 }
 function updateNotifBadge(){
   const unread=DB.notifications.filter(n=>!n.read).length;
@@ -881,6 +946,7 @@ function launchApp(){
   document.getElementById('topbarProcessBtn').style.display='flex';
   document.getElementById('sidebarProcessBtn').style.display='flex';
   updateNotifBadge();
+  requestNotifPermission();
   startPolling();
   if(currentUser.role==='manager'){buildManagerApp();(DB.pendingUsers||[]).forEach(u=>showApprovalToast(u));}
   else buildInvestorApp();
@@ -1203,6 +1269,13 @@ function mgrSendMsg(){
   const input=document.getElementById('mgrReplyInput');const text=input.value.trim();if(!text)return;
   DB.messages[detailTarget.id]=DB.messages[detailTarget.id]||[];
   DB.messages[detailTarget.id].push({from:'manager',text,date:now()});
+  // Store pending notification for investor so they see it when they poll
+  DB.investors.forEach(inv=>{
+    if(inv.id===detailTarget.id){
+      inv.pendingMsgNotif=inv.pendingMsgNotif||[];
+      inv.pendingMsgNotif.push({id:'pmn'+Date.now(),text,date:now()});
+    }
+  });
   saveDB();input.value='';renderDetailChat();
 }
 function deleteInvestor(id){
@@ -1435,6 +1508,8 @@ function invSendMsg(){
   DB.messages[currentUser.id]=DB.messages[currentUser.id]||[];
   DB.messages[currentUser.id].push({from:'investor',text,date:now()});
   addNotif(`New message from ${currentUser.name}.`,'msg');
+  // Push notification for manager (fires if manager is on this device/tab)
+  sendPushNotif('💬 New Message — DSBP',`${currentUser.name}: ${text}`,'dsbp-inv-msg');
   saveDB();input.value='';renderInvestorMessages();
 }
 
