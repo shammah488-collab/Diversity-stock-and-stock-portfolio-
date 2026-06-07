@@ -591,6 +591,7 @@ async function _sm(){await fbSet('messages',DB.messages);}
 let _poll=null;
 let _seenPending=new Set();
 let _seenMsgCount={};   // track message counts per investor thread
+let _seenFundReqs={};   // track fund request counts per investor
 function startPolling(){
   if(_poll)clearInterval(_poll);
   // Seed seen set with already-known pending users so we don't toast on login
@@ -599,6 +600,7 @@ function startPolling(){
   if(currentUser){
     if(currentUser.role==='manager'){
       Object.keys(DB.messages).forEach(invId=>{_seenMsgCount[invId]=(DB.messages[invId]||[]).length;});
+      DB.investors.forEach(inv=>{_seenFundReqs[inv.id]=(inv.fundRequests||[]).length;});
     } else {
       _seenMsgCount[currentUser.id]=(DB.messages[currentUser.id]||[]).length;
     }
@@ -633,10 +635,24 @@ function startPolling(){
           newMsgs.forEach(m=>{
             sendPushNotif('💬 New Message — DSBP',`${name}: ${m.text}`,'dsbp-mgr-msg-'+invId);
           });
-          // In-app notification dot
           addNotif(`New message from ${name}.`,'msg');
         }
         _seenMsgCount[invId]=thread.length;
+      });
+      // Check for new fund requests from any investor
+      DB.investors.forEach(inv=>{
+        const reqs=inv.fundRequests||[];
+        const prev=_seenFundReqs[inv.id]||0;
+        const newReqs=reqs.slice(0,reqs.length-prev).filter(r=>r.status==='pending');
+        if(newReqs.length>0){
+          newReqs.forEach(r=>{
+            const emoji=r.type==='deposit'?'💰':'💸';
+            const label=r.type==='deposit'?'Deposit':'Withdrawal';
+            sendPushNotif(`${emoji} New ${label} Request — DSBP`,`${inv.name} requests a $${fmt(r.amount)} ${r.type}${r.note?' — '+r.note:''}`, 'dsbp-fund-poll-'+inv.id);
+            addNotif(`${label} request of $${fmt(r.amount)} from ${inv.name}.`,'fund');
+          });
+        }
+        _seenFundReqs[inv.id]=reqs.length;
       });
       const ap=document.querySelector('.page.active');
       if(ap){
@@ -692,27 +708,58 @@ function addNotif(msg,type='info'){
   _sn();updateNotifBadge();
 }
 
-// ── PUSH NOTIFICATIONS (browser native) ──
+// ── PUSH NOTIFICATIONS (Service Worker backed) ──
+let _swReg=null;
+const NOTIF_ICON='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2212%22 fill=%22%230A0C0F%22/%3E%3Crect x=%228%22 y=%2216%22 width=%2248%22 height=%228%22 rx=%222%22 fill=%22%23C9A84C%22/%3E%3Crect x=%228%22 y=%2228%22 width=%2232%22 height=%228%22 rx=%222%22 fill=%22%23C9A84C%22/%3E%3Crect x=%228%22 y=%2240%22 width=%2236%22 height=%228%22 rx=%222%22 fill=%22%23C9A84C%22/%3E%3C/svg%3E';
+
+async function registerSW(){
+  if(!('serviceWorker' in navigator))return;
+  try{
+    const swCode=[
+      "self.addEventListener('notificationclick',e=>{",
+      "  e.notification.close();",
+      "  e.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(list=>{",
+      "    for(const c of list){if('focus' in c)return c.focus();}",
+      "    if(clients.openWindow)return clients.openWindow('/');",
+      "  }));",
+      "});",
+      "self.addEventListener('message',e=>{",
+      "  if(e.data&&e.data.type==='SHOW_NOTIF'){",
+      "    const {title,body,tag,icon}=e.data;",
+      "    self.registration.showNotification(title,{body,tag:tag||'dsbp',icon,requireInteraction:false,vibrate:[200,100,200]});",
+      "  }",
+      "});"
+    ].join('\n');
+    const blob=new Blob([swCode],{type:'application/javascript'});
+    const swUrl=URL.createObjectURL(blob);
+    _swReg=await navigator.serviceWorker.register(swUrl,{scope:'/'});
+    await navigator.serviceWorker.ready;
+  }catch(e){console.warn('SW reg failed',e);}
+}
+
 async function requestNotifPermission(){
   if(!('Notification' in window))return;
   if(Notification.permission==='default'){
-    await Notification.requestPermission();
+    const result=await Notification.requestPermission();
+    if(result==='granted')await registerSW();
+  } else if(Notification.permission==='granted'){
+    await registerSW();
   }
 }
+
 function sendPushNotif(title,body,tag){
   if(!('Notification' in window)||Notification.permission!=='granted')return;
-  try{
-    const n=new Notification(title,{
-      body,
-      tag:tag||'dsbp-msg',
-      icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="%230A0C0F"/><rect x="8" y="16" width="48" height="8" rx="2" fill="%23C9A84C"/><rect x="8" y="28" width="32" height="8" rx="2" fill="%23C9A84C"/><rect x="8" y="40" width="36" height="8" rx="2" fill="%23C9A84C"/></svg>',
-      badge:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="%23C9A84C"/></svg>',
-      requireInteraction:false,
-      silent:false
-    });
-    n.onclick=()=>{window.focus();n.close();};
-    setTimeout(()=>n.close(),8000);
-  }catch(e){}
+  const payload={type:'SHOW_NOTIF',title,body,tag:tag||'dsbp',icon:NOTIF_ICON};
+  if(_swReg&&_swReg.active){
+    _swReg.active.postMessage(payload);
+  } else if(navigator.serviceWorker&&navigator.serviceWorker.controller){
+    navigator.serviceWorker.controller.postMessage(payload);
+  } else {
+    try{
+      const n=new Notification(title,{body,tag:tag||'dsbp',icon:NOTIF_ICON,requireInteraction:false});
+      n.onclick=()=>{window.focus();n.close();};setTimeout(()=>n.close(),10000);
+    }catch(e){}
+  }
 }
 function updateNotifBadge(){
   const unread=DB.notifications.filter(n=>!n.read).length;
@@ -1473,6 +1520,7 @@ function submitFundRequest2(){
   inv.fundRequests=inv.fundRequests||[];
   inv.fundRequests.unshift({id:'fr'+Date.now(),type:fundType2==='deposit'?'deposit':'withdraw',amount:amt,note,date:now(),status:'pending'});
   addNotif(`Fund ${fundType2} request of $${fmt(amt)} from ${inv.name}.`,'fund');
+  sendPushNotif(fundType2==='deposit'?'💰 New Deposit Request — DSBP':'💸 New Withdrawal Request — DSBP',`${inv.name} requests a $${fmt(amt)} ${fundType2}${note?' — '+note:''}`, 'dsbp-fund-req');
   saveDB();ok.textContent='Request submitted! The manager will process it shortly.';ok.classList.remove('hidden');
   document.getElementById('fundAmount2').value='';document.getElementById('fundNote2').value='';renderFundReqHistory();
 }
@@ -1530,6 +1578,7 @@ function submitFundRequest(){
   inv.fundRequests=inv.fundRequests||[];
   inv.fundRequests.unshift({id:'fr'+Date.now(),type:fundType,amount:amt,note,date:now(),status:'pending'});
   addNotif(`Fund ${fundType} request of $${fmt(amt)} from ${inv.name}.`,'fund');
+  sendPushNotif(fundType==='deposit'?'💰 New Deposit Request — DSBP':'💸 New Withdrawal Request — DSBP',`${inv.name} requests a $${fmt(amt)} ${fundType}${note?' — '+note:''}`, 'dsbp-fund-req');
   saveDB();ok.textContent='Request submitted successfully!';ok.classList.remove('hidden');
   document.getElementById('fundAmount').value='';document.getElementById('fundNote').value='';
 }
