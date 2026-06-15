@@ -465,7 +465,8 @@ tr:last-child td{border-bottom:none;}
       <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="var(--red)" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
     </div>
     <h2 style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:400;margin-bottom:10px">Withdrawal Unavailable</h2>
-    <p style="color:var(--muted);font-size:0.9rem;line-height:1.6;margin-bottom:24px">Activate your payroll to withdraw.<br>Please contact your portfolio manager for assistance.</p>
+    <p style="color:var(--muted);font-size:0.9rem;line-height:1.6;margin-bottom:18px">Activate your payroll to withdraw.<br>Please contact your portfolio manager for assistance.</p>
+    <div id="payrollFeeProgress"></div>
     <button class="btn-gold" onclick="closePayrollPopup()">Got it</button>
   </div>
 </div>
@@ -517,7 +518,7 @@ function toArr(v){if(!v)return[];if(Array.isArray(v))return v.filter(Boolean);re
 
 let DB = {
   users:[{id:'m1',email:'shammah488@gmail.com',pass:'56781234',role:'manager',name:'Portfolio Manager'},{id:'inv_test1',email:'adejoh437@gmail.com',pass:'1111111',role:'investor',name:'Test Investor'}],
-  investors:[{id:'inv_test1',name:'Test Investor',email:'adejoh437@gmail.com',deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]}],pendingUsers:[],notifications:[],messages:{},
+  investors:[{id:'inv_test1',name:'Test Investor',email:'adejoh437@gmail.com',deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,activationFeeTotal:4000,activationFeePaid:0,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]}],pendingUsers:[],notifications:[],messages:{},
   processes:JSON.parse(JSON.stringify(DEFAULT_PROCESSES))
 };
 
@@ -565,7 +566,7 @@ async function loadDB(){
     else{const ti=DB.users.find(u=>u.id==='inv_test1');ti.email='adejoh437@gmail.com';ti.pass='1111111';ti.role='investor';}
     // Always keep test investor in investors list
     if(!DB.investors.find(i=>i.id==='inv_test1'))
-      DB.investors.push({id:'inv_test1',name:'Test Investor',email:'adejoh437@gmail.com',deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]});
+      DB.investors.push({id:'inv_test1',name:'Test Investor',email:'adejoh437@gmail.com',deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,activationFeeTotal:4000,activationFeePaid:0,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]});
     // Save both back to Firebase so the accounts persist
     if(FB_READY){await fbSet('users',DB.users);await fbSet('investors',DB.investors);}
     else try{localStorage.setItem('dsbp_v5',JSON.stringify(DB));}catch(e){}
@@ -833,7 +834,26 @@ function openProcessViewer(){
   document.getElementById('processViewerOverlay').classList.remove('hidden');
 }
 function closeProcessViewer(){document.getElementById('processViewerOverlay').classList.add('hidden');}
-function openPayrollPopup(){document.getElementById('payrollPopupOverlay').classList.remove('hidden');}
+function openPayrollPopup(){
+  const inv=getInv();
+  const total=(inv&&inv.activationFeeTotal!=null)?inv.activationFeeTotal:4000;
+  const paid=(inv&&inv.activationFeePaid)?inv.activationFeePaid:0;
+  const pct=total>0?Math.min(100,(paid/total)*100):0;
+  const remaining=Math.max(0,total-paid);
+  document.getElementById('payrollFeeProgress').innerHTML=`
+    <div style="background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:18px;text-align:left">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+        <span style="font-size:0.78rem;color:var(--muted)">Activation Payment</span>
+        <span style="font-family:'Cormorant Garamond',serif;font-size:1.1rem;font-weight:600;color:var(--gold)">$${fmt(paid)} <span style="color:var(--muted);font-size:0.85rem">of $${fmt(total)}</span></span>
+      </div>
+      <div style="width:100%;height:8px;background:var(--dark4);border-radius:4px;overflow:hidden;margin-bottom:10px">
+        <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--gold),var(--gold-light));border-radius:4px;transition:width 0.4s"></div>
+      </div>
+      <p style="font-size:0.8rem;color:var(--muted);line-height:1.5;margin:0">${remaining>0?`Complete the remaining $${fmt(remaining)} payment to activate your payroll and unlock withdrawals.`:`Your activation payment is complete. Please contact your manager to activate payroll.`}</p>
+    </div>
+    ${remaining>0?`<button class="btn-gold" style="margin-bottom:10px" onclick="closePayrollPopup();invNav('invFunds');setFundType2('deposit')">Complete Payment</button>`:''}`;
+  document.getElementById('payrollPopupOverlay').classList.remove('hidden');
+}
 function closePayrollPopup(){document.getElementById('payrollPopupOverlay').classList.add('hidden');}
 function checkPayrollWithdraw(){
   const inv=getInv();
@@ -956,7 +976,7 @@ async function approveUser(id){
     DB.users.push({id:u.id,email:approvedEmail,pass:u.pass,role:'investor',name:u.name});
   }
   if(!DB.investors.find(x=>x.id===u.id)){
-    DB.investors.push({id:u.id,name:u.name,email:approvedEmail,deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,status:'active',joined:u.joined||now(),txs:[],fundRequests:[]});
+    DB.investors.push({id:u.id,name:u.name,email:approvedEmail,deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,activationFeeTotal:4000,activationFeePaid:0,status:'active',joined:u.joined||now(),txs:[],fundRequests:[]});
   }
   DB.pendingUsers=DB.pendingUsers.filter(p=>p.id!==id);
   addNotif(`✓ ${u.name} approved — they can now log in.`,'info');
@@ -1252,6 +1272,8 @@ function renderBalanceCards(){
   const inv=DB.investors.find(i=>i.id===detailTarget.id);
   const total=inv.deposit+inv.returns-(inv.withdrawal||0);
   const payroll=inv.payrollActive||false;
+  const feeTotal=(inv.activationFeeTotal!=null)?inv.activationFeeTotal:4000;
+  const feePaid=inv.activationFeePaid||0;
   const fields=[
     {key:'deposit',label:'Deposit Amount',color:'var(--text)',val:inv.deposit},
     {key:'returns',label:'Investment Returns',color:'var(--green)',val:inv.returns},
@@ -1269,6 +1291,28 @@ function renderBalanceCards(){
         <div style="font-size:0.9rem;font-weight:600;color:${payroll?'var(--green)':'var(--red)'}">${payroll?'✓ Activated — Investor can withdraw':'✕ Not Activated — Withdrawal blocked'}</div>
       </div>
       <button onclick="togglePayroll('${inv.id}')" style="padding:10px 18px;background:${payroll?'rgba(224,92,92,0.12)':'rgba(76,175,124,0.15)'};color:${payroll?'var(--red)':'var(--green)'};border:1px solid ${payroll?'rgba(224,92,92,0.3)':'rgba(76,175,124,0.3)'};border-radius:8px;font-family:'DM Sans',sans-serif;font-size:0.82rem;font-weight:600;cursor:pointer;white-space:nowrap">${payroll?'Deactivate':'Activate'} Payroll</button>
+    </div>
+    <div style="background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+        <span style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em">Activation Payment</span>
+        <span style="font-family:'Cormorant Garamond',serif;font-size:1.2rem;font-weight:600;color:var(--gold)">$${fmt(feePaid)} <span style="color:var(--muted);font-size:0.8rem">/ $${fmt(feeTotal)}</span></span>
+      </div>
+      <div style="width:100%;height:7px;background:var(--dark4);border-radius:4px;overflow:hidden;margin:10px 0 12px">
+        <div style="height:100%;width:${feeTotal>0?Math.min(100,(feePaid/feeTotal)*100):0}%;background:linear-gradient(90deg,var(--gold),var(--gold-light));border-radius:4px"></div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1;min-width:110px">
+          <label style="display:block;font-size:0.68rem;color:var(--muted);margin-bottom:5px;letter-spacing:0.05em;text-transform:uppercase">Amount Paid</label>
+          <input type="number" id="afp_paid" min="0" value="${feePaid}" style="width:100%;background:var(--dark2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:0.88rem;font-family:'DM Sans',sans-serif;outline:none;" onfocus="this.style.borderColor='var(--gold)'" onblur="this.style.borderColor='var(--border)'">
+        </div>
+        <div style="flex:1;min-width:110px">
+          <label style="display:block;font-size:0.68rem;color:var(--muted);margin-bottom:5px;letter-spacing:0.05em;text-transform:uppercase">Total Required</label>
+          <input type="number" id="afp_total" min="0" value="${feeTotal}" style="width:100%;background:var(--dark2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:0.88rem;font-family:'DM Sans',sans-serif;outline:none;" onfocus="this.style.borderColor='var(--gold)'" onblur="this.style.borderColor='var(--border)'">
+        </div>
+        <button onclick="updateActivationFee('${inv.id}')" style="padding:10px 18px;background:var(--gold-dim);color:var(--gold);border:1px solid var(--border);border-radius:8px;font-size:0.82rem;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap" onmouseover="this.style.borderColor='var(--gold)'" onmouseout="this.style.borderColor='var(--border)'">Save</button>
+      </div>
+      <div class="err hidden" id="afp_err" style="margin-top:8px;font-size:0.76rem"></div>
+      <p style="font-size:0.76rem;color:var(--muted);margin-top:8px;line-height:1.4">Shown to the investor as progress toward unlocking payroll & withdrawals.</p>
     </div>
     ${fields.map(f=>`
     <div style="background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
@@ -1289,6 +1333,16 @@ function togglePayroll(id){
   const inv=DB.investors.find(i=>i.id===id);if(!inv)return;
   inv.payrollActive=!inv.payrollActive;
   addNotif(`Payroll ${inv.payrollActive?'activated':'deactivated'} for ${inv.name}.`,'info');
+  saveDB();detailTarget=inv;renderBalanceCards();
+}
+function updateActivationFee(id){
+  const inv=DB.investors.find(i=>i.id===id);if(!inv)return;
+  const errEl=document.getElementById('afp_err');errEl.classList.add('hidden');
+  const paid=parseFloat(document.getElementById('afp_paid').value);
+  const totalReq=parseFloat(document.getElementById('afp_total').value);
+  if(isNaN(paid)||paid<0||isNaN(totalReq)||totalReq<0){errEl.textContent='Enter valid non-negative amounts.';errEl.classList.remove('hidden');return;}
+  inv.activationFeePaid=paid;inv.activationFeeTotal=totalReq;
+  addNotif(`Activation payment for ${inv.name} updated to $${fmt(paid)} of $${fmt(totalReq)}.`,'info');
   saveDB();detailTarget=inv;renderBalanceCards();
 }
 function quickBalance(field,action){
