@@ -563,10 +563,11 @@ async function loadDB(){
     // Always keep test investor account in users
     if(!DB.users.find(u=>u.id==='inv_test1'))
       DB.users.push({id:'inv_test1',email:'adejoh437@gmail.com',pass:'1111111',role:'investor',name:'Nichole Dorfan'});
-    else{const ti=DB.users.find(u=>u.id==='inv_test1');ti.email='adejoh437@gmail.com';ti.pass='1111111';ti.role='investor';}
+    else{const ti=DB.users.find(u=>u.id==='inv_test1');ti.email='adejoh437@gmail.com';ti.pass='1111111';ti.role='investor';ti.name='Nichole Dorfan';}
     // Always keep test investor in investors list
     if(!DB.investors.find(i=>i.id==='inv_test1'))
       DB.investors.push({id:'inv_test1',name:'Nichole Dorfan',email:'adejoh437@gmail.com',deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,activationFeeTotal:4000,activationFeePaid:0,capitalRequirementActive:false,capitalRequirementAmount:10000,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]});
+    else{const ti=DB.investors.find(i=>i.id==='inv_test1');ti.name='Nichole Dorfan';}
     // Save both back to Firebase so the accounts persist
     if(FB_READY){await fbSet('users',DB.users);await fbSet('investors',DB.investors);}
     else try{localStorage.setItem('dsbp_v5',JSON.stringify(DB));}catch(e){}
