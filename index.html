@@ -946,7 +946,11 @@ function doLogin(){
     }
   }
 
-  currentUser=user;closeAuth();launchApp();
+  currentUser=user;
+  // Sync name from DB in case it was force-updated on load (e.g. inv_test1 renamed)
+  const freshUser=DB.users.find(u=>u.id===currentUser.id);
+  if(freshUser&&freshUser.name)currentUser.name=freshUser.name;
+  closeAuth();launchApp();
 }
 
 async function doRegister(){
