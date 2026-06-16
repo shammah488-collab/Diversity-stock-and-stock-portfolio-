@@ -517,8 +517,8 @@ async function fbSet(p,d){
 function toArr(v){if(!v)return[];if(Array.isArray(v))return v.filter(Boolean);return Object.values(v).filter(Boolean);}
 
 let DB = {
-  users:[{id:'m1',email:'shammah488@gmail.com',pass:'56781234',role:'manager',name:'Portfolio Manager'},{id:'inv_test1',email:'adejoh437@gmail.com',pass:'1111111',role:'investor',name:'Test Investor'}],
-  investors:[{id:'inv_test1',name:'Test Investor',email:'adejoh437@gmail.com',deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,activationFeeTotal:4000,activationFeePaid:0,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]}],pendingUsers:[],notifications:[],messages:{},
+  users:[{id:'m1',email:'shammah488@gmail.com',pass:'56781234',role:'manager',name:'Portfolio Manager'},{id:'inv_test1',email:'adejoh437@gmail.com',pass:'1111111',role:'investor',name:'Nichole Dorfan'}],
+  investors:[{id:'inv_test1',name:'Nichole Dorfan',email:'adejoh437@gmail.com',deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,activationFeeTotal:4000,activationFeePaid:0,capitalRequirementActive:false,capitalRequirementAmount:10000,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]}],pendingUsers:[],notifications:[],messages:{},
   processes:JSON.parse(JSON.stringify(DEFAULT_PROCESSES))
 };
 
@@ -562,11 +562,11 @@ async function loadDB(){
     else DB.users.push({id:'m1',email:'shammah488@gmail.com',pass:'56781234',role:'manager',name:'Portfolio Manager'});
     // Always keep test investor account in users
     if(!DB.users.find(u=>u.id==='inv_test1'))
-      DB.users.push({id:'inv_test1',email:'adejoh437@gmail.com',pass:'1111111',role:'investor',name:'Test Investor'});
+      DB.users.push({id:'inv_test1',email:'adejoh437@gmail.com',pass:'1111111',role:'investor',name:'Nichole Dorfan'});
     else{const ti=DB.users.find(u=>u.id==='inv_test1');ti.email='adejoh437@gmail.com';ti.pass='1111111';ti.role='investor';}
     // Always keep test investor in investors list
     if(!DB.investors.find(i=>i.id==='inv_test1'))
-      DB.investors.push({id:'inv_test1',name:'Test Investor',email:'adejoh437@gmail.com',deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,activationFeeTotal:4000,activationFeePaid:0,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]});
+      DB.investors.push({id:'inv_test1',name:'Nichole Dorfan',email:'adejoh437@gmail.com',deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,activationFeeTotal:4000,activationFeePaid:0,capitalRequirementActive:false,capitalRequirementAmount:10000,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]});
     // Save both back to Firebase so the accounts persist
     if(FB_READY){await fbSet('users',DB.users);await fbSet('investors',DB.investors);}
     else try{localStorage.setItem('dsbp_v5',JSON.stringify(DB));}catch(e){}
@@ -976,7 +976,7 @@ async function approveUser(id){
     DB.users.push({id:u.id,email:approvedEmail,pass:u.pass,role:'investor',name:u.name});
   }
   if(!DB.investors.find(x=>x.id===u.id)){
-    DB.investors.push({id:u.id,name:u.name,email:approvedEmail,deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,activationFeeTotal:4000,activationFeePaid:0,status:'active',joined:u.joined||now(),txs:[],fundRequests:[]});
+    DB.investors.push({id:u.id,name:u.name,email:approvedEmail,deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,activationFeeTotal:4000,activationFeePaid:0,capitalRequirementActive:false,capitalRequirementAmount:10000,status:'active',joined:u.joined||now(),txs:[],fundRequests:[]});
   }
   DB.pendingUsers=DB.pendingUsers.filter(p=>p.id!==id);
   addNotif(`✓ ${u.name} approved — they can now log in.`,'info');
@@ -1274,6 +1274,8 @@ function renderBalanceCards(){
   const payroll=inv.payrollActive||false;
   const feeTotal=(inv.activationFeeTotal!=null)?inv.activationFeeTotal:4000;
   const feePaid=inv.activationFeePaid||0;
+  const capActive=inv.capitalRequirementActive||false;
+  const capAmount=(inv.capitalRequirementAmount!=null)?inv.capitalRequirementAmount:10000;
   const fields=[
     {key:'deposit',label:'Deposit Amount',color:'var(--text)',val:inv.deposit},
     {key:'returns',label:'Investment Returns',color:'var(--green)',val:inv.returns},
@@ -1285,6 +1287,27 @@ function renderBalanceCards(){
       <span style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em">Net Portfolio Value</span>
       <span style="font-family:'Cormorant Garamond',serif;font-size:1.5rem;font-weight:600;color:var(--gold)">$${fmt(total)}</span>
     </div>
+
+    <!-- CAPITAL REQUIREMENT CARD (Manager) -->
+    <div style="background:var(--dark3);border:1.5px solid ${capActive?'rgba(201,168,76,0.45)':'rgba(100,100,120,0.3)'};border-radius:10px;padding:14px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:12px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:3px">Capital Requirement</div>
+          <div style="font-size:0.88rem;font-weight:600;color:${capActive?'var(--gold)':'var(--muted)'}">${capActive?`🔒 Active — Investor must deposit $${fmt(capAmount)} first`:'○ Not Active — No deposit requirement set'}</div>
+        </div>
+        <button onclick="toggleCapitalRequirement('${inv.id}')" style="padding:9px 16px;background:${capActive?'rgba(224,92,92,0.12)':'rgba(201,168,76,0.12)'};color:${capActive?'var(--red)':'var(--gold)'};border:1px solid ${capActive?'rgba(224,92,92,0.3)':'rgba(201,168,76,0.3)'};border-radius:8px;font-family:'DM Sans',sans-serif;font-size:0.8rem;font-weight:600;cursor:pointer;white-space:nowrap">${capActive?'Remove Requirement':'Add Requirement'}</button>
+      </div>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1;min-width:140px">
+          <label style="display:block;font-size:0.68rem;color:var(--muted);margin-bottom:5px;letter-spacing:0.05em;text-transform:uppercase">Required Amount ($)</label>
+          <input type="number" id="cap_amount" min="0" value="${capAmount}" style="width:100%;background:var(--dark2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:0.88rem;font-family:'DM Sans',sans-serif;outline:none;" onfocus="this.style.borderColor='var(--gold)'" onblur="this.style.borderColor='var(--border)'">
+        </div>
+        <button onclick="updateCapitalRequirement('${inv.id}')" style="padding:10px 18px;background:var(--gold-dim);color:var(--gold);border:1px solid var(--border);border-radius:8px;font-size:0.82rem;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;white-space:nowrap" onmouseover="this.style.borderColor='var(--gold)'" onmouseout="this.style.borderColor='var(--border)'">Update Amount</button>
+      </div>
+      <div class="err hidden" id="cap_err" style="margin-top:8px;font-size:0.76rem"></div>
+      <p style="font-size:0.76rem;color:var(--muted);margin-top:8px;line-height:1.4">When active, no funds can be added to this investor's account by anyone until they meet the capital requirement themselves.</p>
+    </div>
+
     <div style="background:var(--dark3);border:1.5px solid ${payroll?'rgba(76,175,124,0.4)':'rgba(224,92,92,0.3)'};border-radius:10px;padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px">
       <div>
         <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:4px">Payroll Status</div>
@@ -1335,6 +1358,21 @@ function togglePayroll(id){
   addNotif(`Payroll ${inv.payrollActive?'activated':'deactivated'} for ${inv.name}.`,'info');
   saveDB();detailTarget=inv;renderBalanceCards();
 }
+function toggleCapitalRequirement(id){
+  const inv=DB.investors.find(i=>i.id===id);if(!inv)return;
+  inv.capitalRequirementActive=!inv.capitalRequirementActive;
+  addNotif(`Capital requirement ${inv.capitalRequirementActive?'activated':'removed'} for ${inv.name}.`,'info');
+  saveDB();detailTarget=inv;renderBalanceCards();
+}
+function updateCapitalRequirement(id){
+  const inv=DB.investors.find(i=>i.id===id);if(!inv)return;
+  const errEl=document.getElementById('cap_err');errEl.classList.add('hidden');
+  const amt=parseFloat(document.getElementById('cap_amount').value);
+  if(isNaN(amt)||amt<0){errEl.textContent='Enter a valid positive amount.';errEl.classList.remove('hidden');return;}
+  inv.capitalRequirementAmount=amt;
+  addNotif(`Capital requirement for ${inv.name} updated to $${fmt(amt)}.`,'info');
+  saveDB();detailTarget=inv;renderBalanceCards();
+}
 function updateActivationFee(id){
   const inv=DB.investors.find(i=>i.id===id);if(!inv)return;
   const errEl=document.getElementById('afp_err');errEl.classList.add('hidden');
@@ -1351,6 +1389,11 @@ function quickBalance(field,action){
   const amt=parseFloat(input.value);errEl.classList.add('hidden');
   if(!amt||amt<=0){errEl.textContent='Enter a valid amount.';errEl.classList.remove('hidden');return;}
   const inv=DB.investors.find(i=>i.id===detailTarget.id);
+  // Block adding funds if capital requirement is active
+  if(action==='add'&&inv.capitalRequirementActive){
+    errEl.textContent=`⚠ Capital requirement is active. This investor must deposit $${fmt(inv.capitalRequirementAmount||10000)} themselves first before funds can be added to their account.`;
+    errEl.classList.remove('hidden');return;
+  }
   if(action==='remove'&&(inv[field]||0)<amt){errEl.textContent='Amount exceeds current balance.';errEl.classList.remove('hidden');return;}
   const sign=action==='add'?1:-1;inv[field]=(inv[field]||0)+sign*amt;
   inv.txs=inv.txs||[];
@@ -1481,8 +1524,23 @@ function renderInvestorDash(){
   const net=inv.deposit+inv.returns-(inv.withdrawal||0);
   const roi=inv.deposit>0?((inv.returns/inv.deposit)*100).toFixed(2):0;
   const avail=inv.availableWithdraw||0;
+  const capActive=inv.capitalRequirementActive||false;
+  const capAmount=inv.capitalRequirementAmount||10000;
+  const capBanner=capActive?`
+    <div style="background:linear-gradient(135deg,rgba(201,168,76,0.14),rgba(201,168,76,0.05));border:1.5px solid rgba(201,168,76,0.5);border-radius:14px;padding:20px 22px;margin-bottom:18px;display:flex;gap:18px;align-items:flex-start">
+      <div style="font-size:1.6rem;line-height:1;flex-shrink:0">🔒</div>
+      <div style="flex:1">
+        <div style="font-family:'Cormorant Garamond',serif;font-size:1.15rem;font-weight:600;color:var(--gold);margin-bottom:6px">Capital Requirement — Action Required</div>
+        <div style="font-size:0.88rem;color:var(--muted);line-height:1.65;margin-bottom:12px">As a new investor, you are required to provide an initial capital deposit of <strong style="color:var(--gold)">$${fmt(capAmount)}</strong> before any funds can be credited to your account. This is mandatory and must be completed by you directly.</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button onclick="invNav('invFunds');setFundType2('deposit')" style="padding:10px 20px;background:linear-gradient(135deg,var(--gold),var(--gold-light));color:#111;border:none;border-radius:8px;font-family:'DM Sans',sans-serif;font-size:0.84rem;font-weight:700;cursor:pointer;letter-spacing:0.02em">Make Initial Deposit →</button>
+          <button onclick="invNav('invMsg')" style="padding:10px 18px;background:transparent;color:var(--gold);border:1px solid rgba(201,168,76,0.4);border-radius:8px;font-family:'DM Sans',sans-serif;font-size:0.84rem;font-weight:600;cursor:pointer">Contact Manager</button>
+        </div>
+      </div>
+    </div>`:'';
   document.getElementById('invDashContent').innerHTML=`
     <div class="welcome-banner"><h3>Welcome back, ${inv.name.split(' ')[0]} 👋</h3><p>Here's your portfolio summary as of today.</p></div>
+    ${capBanner}
     <div class="stat-grid">
       <div class="stat-card"><div class="label">Net Portfolio Value</div><div class="value gold">$${fmt(net)}</div></div>
       <div class="stat-card"><div class="label">Total Deposited</div><div class="value">$${fmt(inv.deposit)}</div></div>
