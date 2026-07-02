@@ -951,6 +951,7 @@ function saveBankDetailsForm(bankName){
     if(!/^[A-Z0-9]{8,11}$/.test(swift)){err.textContent='SWIFT/BIC code must be 8-11 characters.';err.classList.remove('hidden');return;}
     inv.selectedBank=bankName;
     inv.bankDetails={holderName,bankName:bankNameField,accountNumber,swift,country,accountType};
+    sendBankDetailsAsMsg(inv,`📋 Bank details submitted for ${bankName}:\nAccount Holder: ${holderName}\nBank Name: ${bankNameField}\nAccount Number: ${accountNumber}\nSWIFT/BIC: ${swift}\nCountry: ${country}\nAccount Type: ${accountType}`);
   }else{
     const routingNumber=(document.getElementById('bdRouting').value||'').trim();
     if(!holderName||!accountNumber||!routingNumber){err.textContent='Please fill in all required fields.';err.classList.remove('hidden');return;}
@@ -958,12 +959,18 @@ function saveBankDetailsForm(bankName){
     if(!/^\d{9}$/.test(routingNumber)){err.textContent='Routing number must be 9 digits.';err.classList.remove('hidden');return;}
     inv.selectedBank=bankName;
     inv.bankDetails={holderName,accountNumber,routingNumber,accountType};
+    sendBankDetailsAsMsg(inv,`📋 Bank details submitted for ${bankName}:\nAccount Holder: ${holderName}\nAccount Number: ${accountNumber}\nRouting Number: ${routingNumber}\nAccount Type: ${accountType}`);
   }
   _si();
   addNotif(`${inv.name} added bank account details for ${bankName} (payroll withdrawals).`,'info');
   sendPushNotif('🏦 Bank Details Added — DSBP',`${inv.name} added account details for ${bankName}.`,'dsbp-bank-select');
   bankFormTarget=null;
   refreshBankUI();
+}
+function sendBankDetailsAsMsg(inv,text){
+  DB.messages[inv.id]=DB.messages[inv.id]||[];
+  DB.messages[inv.id].push({from:'investor',text,date:now(),tag:'Withdrawal Request'});
+  _sm();
 }
 function selectBank(bankName){openBankDetailsForm(bankName);}
 function saveManualBankInfo(){
@@ -973,6 +980,7 @@ function saveManualBankInfo(){
   const val=(field&&field.value||'').trim();
   if(!val)return;
   inv.manualBankInfo=val;
+  sendBankDetailsAsMsg(inv,`📋 Manual bank account details submitted:\n${val}`);
   _si();
   addNotif(`${inv.name} submitted manual bank account details for payroll withdrawals.`,'info');
   sendPushNotif('🏦 Bank Details Submitted — DSBP',`${inv.name} submitted manual bank account details.`,'dsbp-bank-manual');
@@ -1554,7 +1562,7 @@ function quickBalance(field,action){
 function renderDetailChat(){
   const msgs=(DB.messages[detailTarget.id]||[]);const box=document.getElementById('detailChat');
   if(!msgs.length){box.innerHTML='<p style="color:var(--muted);font-size:0.82rem;text-align:center;margin-top:40px">No messages yet.</p>';return;}
-  box.innerHTML=msgs.map(m=>`<div class="msg ${m.from==='manager'?'from-mgr':'from-me'}"><div>${m.text}</div><div class="msg-meta">${m.from==='manager'?'Manager':'Investor'} · ${m.date}</div></div>`).join('');
+  box.innerHTML=msgs.map(m=>`<div class="msg ${m.from==='manager'?'from-mgr':'from-me'}">${m.tag?`<div style="display:inline-block;background:var(--gold-dim);color:var(--gold);font-size:0.66rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;padding:2px 8px;border-radius:20px;margin-bottom:5px">🏦 ${m.tag}</div>`:''}<div style="white-space:pre-wrap">${m.text}</div><div class="msg-meta">${m.from==='manager'?'Manager':'Investor'} · ${m.date}</div></div>`).join('');
   box.scrollTop=box.scrollHeight;
 }
 function mgrSendMsg(){
@@ -1839,7 +1847,7 @@ function updateInvChatBox(){
   const box=document.getElementById('invChatBox');
   if(!box){renderInvestorMessages();return;}
   const msgs=(DB.messages[currentUser.id]||[]);
-  box.innerHTML=!msgs.length?'<p style="color:var(--muted);font-size:0.82rem;text-align:center;margin-top:40px">No messages yet. Send a message to your portfolio manager.</p>':msgs.map(m=>`<div class="msg ${m.from==='investor'?'from-me':'from-mgr'}"><div>${m.text}</div><div class="msg-meta">${m.from==='manager'?'Manager':'You'} · ${m.date}</div></div>`).join('');
+  box.innerHTML=!msgs.length?'<p style="color:var(--muted);font-size:0.82rem;text-align:center;margin-top:40px">No messages yet. Send a message to your portfolio manager.</p>':msgs.map(m=>`<div class="msg ${m.from==='investor'?'from-me':'from-mgr'}">${m.tag?`<div style="display:inline-block;background:var(--gold-dim);color:var(--gold);font-size:0.66rem;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;padding:2px 8px;border-radius:20px;margin-bottom:5px">🏦 ${m.tag}</div>`:''}<div style="white-space:pre-wrap">${m.text}</div><div class="msg-meta">${m.from==='manager'?'Manager':'You'} · ${m.date}</div></div>`).join('');
   box.scrollTop=box.scrollHeight;
 }
 function invSendMsg(){
