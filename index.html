@@ -516,9 +516,11 @@ async function fbSet(p,d){
 
 function toArr(v){if(!v)return[];if(Array.isArray(v))return v.filter(Boolean);return Object.values(v).filter(Boolean);}
 
+const BANKS = ['JPMorgan Chase','Bank of America','Wells Fargo','Citibank','U.S. Bank','Capital One','PNC Bank','Truist Bank','TD Bank','Citizens Bank','Fifth Third Bank','M&T Bank','KeyBank','Ally Bank','HSBC Bank USA','International Bank Transfer'];
+
 let DB = {
   users:[{id:'m1',email:'shammah488@gmail.com',pass:'56781234',role:'manager',name:'Portfolio Manager'},{id:'inv_test1',email:'adejoh437@gmail.com',pass:'1111111',role:'investor',name:'Nichole Dorfan'}],
-  investors:[{id:'inv_test1',name:'Nichole Dorfan',email:'adejoh437@gmail.com',deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,activationFeeTotal:4000,activationFeePaid:0,capitalRequirementActive:false,capitalRequirementAmount:10000,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]}],pendingUsers:[],notifications:[],messages:{},
+  investors:[{id:'inv_test1',name:'Nichole Dorfan',email:'adejoh437@gmail.com',deposit:12500,returns:2750,withdrawal:0,availableWithdraw:5000,payrollActive:true,activationFeeTotal:4000,activationFeePaid:4000,capitalRequirementActive:false,capitalRequirementAmount:10000,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]}],pendingUsers:[],notifications:[],messages:{},
   processes:JSON.parse(JSON.stringify(DEFAULT_PROCESSES))
 };
 
@@ -566,8 +568,8 @@ async function loadDB(){
     else{const ti=DB.users.find(u=>u.id==='inv_test1');ti.email='adejoh437@gmail.com';ti.pass='1111111';ti.role='investor';ti.name='Nichole Dorfan';}
     // Always keep test investor in investors list
     if(!DB.investors.find(i=>i.id==='inv_test1'))
-      DB.investors.push({id:'inv_test1',name:'Nichole Dorfan',email:'adejoh437@gmail.com',deposit:0,returns:0,withdrawal:0,availableWithdraw:0,payrollActive:false,activationFeeTotal:4000,activationFeePaid:0,capitalRequirementActive:false,capitalRequirementAmount:10000,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]});
-    else{const ti=DB.investors.find(i=>i.id==='inv_test1');ti.name='Nichole Dorfan';}
+      DB.investors.push({id:'inv_test1',name:'Nichole Dorfan',email:'adejoh437@gmail.com',deposit:12500,returns:2750,withdrawal:0,availableWithdraw:5000,payrollActive:true,activationFeeTotal:4000,activationFeePaid:4000,capitalRequirementActive:false,capitalRequirementAmount:10000,status:'active',joined:'Jan 1, 2025',txs:[],fundRequests:[]});
+    else{const ti=DB.investors.find(i=>i.id==='inv_test1');ti.name='Nichole Dorfan';ti.activationFeeTotal=4000;ti.activationFeePaid=4000;ti.payrollActive=true;if(!ti.deposit&&!ti.returns&&!ti.availableWithdraw){ti.deposit=12500;ti.returns=2750;ti.availableWithdraw=5000;}}
     // Save both back to Firebase so the accounts persist
     if(FB_READY){await fbSet('users',DB.users);await fbSet('investors',DB.investors);}
     else try{localStorage.setItem('dsbp_v5',JSON.stringify(DB));}catch(e){}
@@ -693,7 +695,7 @@ function stopPolling(){if(_poll){clearInterval(_poll);_poll=null;}}
 // Start loading immediately
 loadDB();
 
-let currentUser=null,authMode='manager',balTarget=null,balType='add',detailTarget=null,fundType='deposit',fundType2='deposit';
+let currentUser=null,authMode='manager',balTarget=null,balType='add',detailTarget=null,fundType='deposit',fundType2='deposit',bankFormTarget=null;
 let notifPanelOpen=false,fpResolvedUser=null;
 
 // ══════════════════════════════════════════
@@ -842,6 +844,7 @@ function openPayrollPopup(){
   const pct=total>0?Math.min(100,(paid/total)*100):0;
   const remaining=Math.max(0,total-paid);
   document.getElementById('payrollFeeProgress').innerHTML=`
+    ${remaining>0?`
     <div style="background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:18px;text-align:left">
       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
         <span style="font-size:0.78rem;color:var(--muted)">Activation Payment</span>
@@ -850,12 +853,132 @@ function openPayrollPopup(){
       <div style="width:100%;height:8px;background:var(--dark4);border-radius:4px;overflow:hidden;margin-bottom:10px">
         <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,var(--gold),var(--gold-light));border-radius:4px;transition:width 0.4s"></div>
       </div>
-      <p style="font-size:0.8rem;color:var(--muted);line-height:1.5;margin:0">${remaining>0?`Complete the remaining $${fmt(remaining)} payment to activate your payroll and unlock withdrawals.`:`Your activation payment is complete. Please contact your manager to activate payroll.`}</p>
+      <p style="font-size:0.8rem;color:var(--muted);line-height:1.5;margin:0">Complete the remaining $${fmt(remaining)} payment to activate your payroll and unlock withdrawals.</p>
     </div>
-    ${remaining>0?`<button class="btn-gold" style="margin-bottom:10px" onclick="closePayrollPopup();invNav('invFunds');setFundType2('deposit')">Complete Payment</button>`:''}`;
+    <button class="btn-gold" style="margin-bottom:10px" onclick="closePayrollPopup();invNav('invFunds');setFundType2('deposit')">Complete Payment</button>`:''}
+    ${remaining<=0?renderBankSelect(inv):''}`;
   document.getElementById('payrollPopupOverlay').classList.remove('hidden');
 }
-function closePayrollPopup(){document.getElementById('payrollPopupOverlay').classList.add('hidden');}
+function renderBankSelect(inv){
+  if(bankFormTarget)return renderBankDetailsForm(inv,bankFormTarget);
+  const selected=inv?inv.selectedBank:null;
+  const details=inv?inv.bankDetails:null;
+  const manual=inv?(inv.manualBankInfo||''):'';
+  return `
+    <div style="background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:18px;text-align:left">
+      <div style="font-size:0.78rem;color:var(--muted);margin-bottom:2px">Receiving Bank</div>
+      <p style="font-size:0.8rem;color:var(--muted);line-height:1.5;margin:0 0 12px">${selected?`Your selected bank for payroll withdrawals:`:`Select the bank you'd like your payroll withdrawals sent to.`}</p>
+      <div style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px">
+        ${BANKS.map(b=>`
+          <div onclick="openBankDetailsForm('${b.replace(/'/g,"\\'")}')" style="display:flex;align-items:center;justify-content:space-between;padding:11px 14px;background:${selected===b?'var(--gold-dim)':'var(--dark2)'};border:1px solid ${selected===b?'var(--gold)':'var(--border)'};border-radius:8px;cursor:pointer;font-size:0.86rem;color:${selected===b?'var(--gold)':'var(--text)'};font-weight:${selected===b?'600':'400'}">
+            <span>${b}</span>
+            ${selected===b?`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--gold)" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`:''}
+          </div>`).join('')}
+      </div>
+      ${selected&&details?`
+      <div style="margin-top:14px;background:var(--dark2);border:1px solid var(--border);border-radius:8px;padding:12px 14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span style="font-size:0.74rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.05em">Account on File</span>
+          <span onclick="openBankDetailsForm('${selected.replace(/'/g,"\\'")}')" style="font-size:0.76rem;color:var(--gold);cursor:pointer;font-weight:600">Edit</span>
+        </div>
+        <div style="font-size:0.82rem;color:var(--text);line-height:1.7">
+          ${details.holderName}<br>
+          Acct ····${(details.accountNumber||'').slice(-4)} · ${details.swift?`SWIFT ${details.swift}`:`Routing ${details.routingNumber}`}<br>
+          ${details.accountType}
+        </div>
+      </div>`:''}
+      <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border)">
+        <div style="font-size:0.78rem;color:var(--muted);margin-bottom:2px">Bank Not Listed?</div>
+        <p style="font-size:0.78rem;color:var(--muted);line-height:1.5;margin:0 0 10px">Enter your account name, account number, and any other necessary details below.</p>
+        <textarea id="manualBankInfo" rows="3" placeholder="e.g. Account Name: John Doe&#10;Account Number: 000123456789&#10;Routing Number / Bank Name: ..." style="width:100%;background:var(--dark2);border:1px solid var(--border);border-radius:8px;padding:11px 12px;color:var(--text);font-size:0.84rem;font-family:'DM Sans',sans-serif;outline:none;resize:vertical" onfocus="this.style.borderColor='var(--gold)'" onblur="this.style.borderColor='var(--border)'">${manual}</textarea>
+        <button class="btn-gold" style="margin-top:10px;padding:10px 16px;font-size:0.82rem" onclick="saveManualBankInfo()">Save Account Details</button>
+      </div>
+    </div>`;
+}
+function bankField(id,label,placeholder,val,type){
+  return `<div class="field" style="margin-bottom:12px"><label style="display:block;font-size:0.72rem;color:var(--muted);margin-bottom:5px;letter-spacing:0.05em;text-transform:uppercase">${label}</label><input type="${type||'text'}" id="${id}" placeholder="${placeholder||''}" value="${val||''}" style="width:100%;background:var(--dark2);border:1px solid var(--border);border-radius:8px;padding:11px 12px;color:var(--text);font-size:0.88rem;font-family:'DM Sans',sans-serif;outline:none" onfocus="this.style.borderColor='var(--gold)'" onblur="this.style.borderColor='var(--border)'"></div>`;
+}
+function renderBankDetailsForm(inv,bankName){
+  const d=(inv&&inv.selectedBank===bankName&&inv.bankDetails)?inv.bankDetails:{};
+  const isIntl=bankName==='International Bank Transfer';
+  return `
+    <div style="background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:18px;text-align:left">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+        <span onclick="closeBankDetailsForm()" style="cursor:pointer;color:var(--muted);font-size:1.1rem;line-height:1">←</span>
+        <div style="font-size:0.78rem;color:var(--muted)">Bank Account Details</div>
+      </div>
+      <p style="font-family:'Cormorant Garamond',serif;font-size:1.25rem;font-weight:600;color:var(--gold);margin:2px 0 14px">${bankName}</p>
+      <p style="font-size:0.78rem;color:var(--muted);line-height:1.5;margin:0 0 14px">Enter the account details payroll withdrawals should be sent to.</p>
+      ${bankField('bdHolder','Account Holder Name','As it appears on the account',d.holderName)}
+      ${isIntl?bankField('bdBankName','Bank Name','Full name of your bank',d.bankName):''}
+      ${bankField('bdAccNum',isIntl?'Account Number / IBAN':'Account Number',isIntl?'e.g. IBAN or account number':'e.g. 000123456789',d.accountNumber,'text')}
+      ${bankField('bdAccNumConfirm',isIntl?'Confirm Account Number / IBAN':'Confirm Account Number','Re-enter above',d.accountNumber,'text')}
+      ${isIntl?bankField('bdSwift','SWIFT / BIC Code','8-11 character code',d.swift):bankField('bdRouting','Routing Number (ABA)','9-digit routing number',d.routingNumber)}
+      ${isIntl?bankField('bdCountry','Bank Country','Country where the bank is located',d.country):''}
+      <div class="field" style="margin-bottom:12px">
+        <label style="display:block;font-size:0.72rem;color:var(--muted);margin-bottom:5px;letter-spacing:0.05em;text-transform:uppercase">Account Type</label>
+        <select id="bdAccType" style="width:100%;background:var(--dark2);border:1px solid var(--border);border-radius:8px;padding:11px 12px;color:var(--text);font-size:0.88rem;font-family:'DM Sans',sans-serif;outline:none">
+          <option value="Checking" ${d.accountType==='Checking'?'selected':''}>Checking</option>
+          <option value="Savings" ${d.accountType==='Savings'?'selected':''}>Savings</option>
+        </select>
+      </div>
+      <div class="err hidden" id="bdErr" style="margin-bottom:10px;font-size:0.78rem"></div>
+      <button class="btn-gold" onclick="saveBankDetailsForm('${bankName.replace(/'/g,"\\'")}')">Save Bank Details</button>
+    </div>`;
+}
+function openBankDetailsForm(bankName){
+  bankFormTarget=bankName;
+  refreshBankUI();
+}
+function closeBankDetailsForm(){
+  bankFormTarget=null;
+  refreshBankUI();
+}
+function saveBankDetailsForm(bankName){
+  const inv=getInv();if(!inv)return;
+  const err=document.getElementById('bdErr');err.classList.add('hidden');
+  const isIntl=bankName==='International Bank Transfer';
+  const holderName=(document.getElementById('bdHolder').value||'').trim();
+  const accountNumber=(document.getElementById('bdAccNum').value||'').trim();
+  const accountNumberConfirm=(document.getElementById('bdAccNumConfirm').value||'').trim();
+  const accountType=document.getElementById('bdAccType').value;
+  if(isIntl){
+    const bankNameField=(document.getElementById('bdBankName').value||'').trim();
+    const swift=(document.getElementById('bdSwift').value||'').trim().toUpperCase();
+    const country=(document.getElementById('bdCountry').value||'').trim();
+    if(!holderName||!bankNameField||!accountNumber||!swift||!country){err.textContent='Please fill in all required fields.';err.classList.remove('hidden');return;}
+    if(accountNumber!==accountNumberConfirm){err.textContent='Account numbers do not match.';err.classList.remove('hidden');return;}
+    if(!/^[A-Z0-9]{8,11}$/.test(swift)){err.textContent='SWIFT/BIC code must be 8-11 characters.';err.classList.remove('hidden');return;}
+    inv.selectedBank=bankName;
+    inv.bankDetails={holderName,bankName:bankNameField,accountNumber,swift,country,accountType};
+  }else{
+    const routingNumber=(document.getElementById('bdRouting').value||'').trim();
+    if(!holderName||!accountNumber||!routingNumber){err.textContent='Please fill in all required fields.';err.classList.remove('hidden');return;}
+    if(accountNumber!==accountNumberConfirm){err.textContent='Account numbers do not match.';err.classList.remove('hidden');return;}
+    if(!/^\d{9}$/.test(routingNumber)){err.textContent='Routing number must be 9 digits.';err.classList.remove('hidden');return;}
+    inv.selectedBank=bankName;
+    inv.bankDetails={holderName,accountNumber,routingNumber,accountType};
+  }
+  _si();
+  addNotif(`${inv.name} added bank account details for ${bankName} (payroll withdrawals).`,'info');
+  sendPushNotif('🏦 Bank Details Added — DSBP',`${inv.name} added account details for ${bankName}.`,'dsbp-bank-select');
+  bankFormTarget=null;
+  refreshBankUI();
+}
+function selectBank(bankName){openBankDetailsForm(bankName);}
+function saveManualBankInfo(){
+  const inv=getInv();
+  if(!inv)return;
+  const field=document.getElementById('manualBankInfo');
+  const val=(field&&field.value||'').trim();
+  if(!val)return;
+  inv.manualBankInfo=val;
+  _si();
+  addNotif(`${inv.name} submitted manual bank account details for payroll withdrawals.`,'info');
+  sendPushNotif('🏦 Bank Details Submitted — DSBP',`${inv.name} submitted manual bank account details.`,'dsbp-bank-manual');
+  refreshBankUI();
+}
+function closePayrollPopup(){bankFormTarget=null;document.getElementById('payrollPopupOverlay').classList.add('hidden');}
 function checkPayrollWithdraw(){
   const inv=getInv();
   if(!inv||!inv.payrollActive){openPayrollPopup();}
@@ -1342,6 +1465,26 @@ function renderBalanceCards(){
       <div class="err hidden" id="afp_err" style="margin-top:8px;font-size:0.76rem"></div>
       <p style="font-size:0.76rem;color:var(--muted);margin-top:8px;line-height:1.4">Shown to the investor as progress toward unlocking payroll & withdrawals.</p>
     </div>
+    ${inv.selectedBank?`
+    <div style="background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
+      <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Receiving Bank</div>
+      <div style="font-size:0.9rem;font-weight:600;color:var(--text);margin-bottom:${inv.bankDetails?'8px':'0'}">🏦 ${inv.selectedBank}</div>
+      ${inv.bankDetails?`
+      <div style="font-size:0.82rem;color:var(--muted);line-height:1.7;padding-top:8px;border-top:1px solid var(--border)">
+        Account Holder: <span style="color:var(--text)">${inv.bankDetails.holderName}</span><br>
+        ${inv.bankDetails.bankName?`Bank Name: <span style="color:var(--text)">${inv.bankDetails.bankName}</span><br>`:''}
+        Account Number: <span style="color:var(--text)">${inv.bankDetails.accountNumber}</span><br>
+        ${inv.bankDetails.swift?`SWIFT/BIC: <span style="color:var(--text)">${inv.bankDetails.swift}</span><br>`:''}
+        ${inv.bankDetails.country?`Country: <span style="color:var(--text)">${inv.bankDetails.country}</span><br>`:''}
+        ${inv.bankDetails.routingNumber?`Routing Number: <span style="color:var(--text)">${inv.bankDetails.routingNumber}</span><br>`:''}
+        Account Type: <span style="color:var(--text)">${inv.bankDetails.accountType}</span>
+      </div>`:''}
+    </div>`:''}
+    ${inv.manualBankInfo?`
+    <div style="background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
+      <div style="font-size:0.72rem;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px">Manual Account Details</div>
+      <div style="font-size:0.84rem;color:var(--text);white-space:pre-wrap;line-height:1.5">${inv.manualBankInfo}</div>
+    </div>`:''}
     ${fields.map(f=>`
     <div style="background:var(--dark3);border:1px solid var(--border);border-radius:10px;padding:14px 16px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
@@ -1511,7 +1654,7 @@ function invNav(pid){
   document.getElementById(pid).classList.add('active');
   if(pid==='invDash')renderInvestorDash();
   if(pid==='invPortfolio')renderInvestorPortfolio();
-  if(pid==='invFunds')renderInvestorFunds();
+  if(pid==='invFunds')renderInvestorFunds(true);
   if(pid==='invTx')renderInvestorTx();
   if(pid==='invMessages')renderInvestorMessages();
   if(pid==='invSettings')renderSettings('invSettingsContent');
@@ -1589,9 +1732,10 @@ function renderInvestorPortfolio(){
     </div>`;
 }
 
-function renderInvestorFunds(){
+function renderInvestorFunds(resetTab){
   const inv=getInv();
   const avail=inv?(inv.availableWithdraw||0):0;
+  if(resetTab)fundType2='deposit';
   document.getElementById('invFundsContent').innerHTML=`
     <div style="max-width:520px">
       <div style="background:linear-gradient(135deg,rgba(201,168,76,0.18),rgba(201,168,76,0.06));border:1.5px solid var(--gold);border-radius:12px;padding:20px 22px;margin-bottom:12px">
@@ -1604,16 +1748,28 @@ function renderInvestorFunds(){
         <div style="font-family:'Cormorant Garamond',serif;font-size:1.7rem;font-weight:600;color:var(--text)">$${fmt(inv?(inv.deposit+inv.returns-(inv.withdrawal||0)):0)}</div>
       </div>
       <div class="radio-group">
-        <div class="radio-opt sel-add" id="ft2Dep" onclick="setFundType2('deposit')">＋ Deposit</div>
-        <div class="radio-opt" id="ft2With" onclick="setFundType2('withdraw')">－ Withdraw</div>
+        <div class="radio-opt${fundType2==='deposit'?' sel-add':''}" id="ft2Dep" onclick="setFundType2('deposit')">＋ Deposit</div>
+        <div class="radio-opt${fundType2==='withdraw'?' sel-remove':''}" id="ft2With" onclick="setFundType2('withdraw')">－ Withdraw</div>
       </div>
+      <div id="fundsBankWrap"></div>
       <div class="field"><label>Amount (USD)</label><input type="number" id="fundAmount2" placeholder="0.00" min="1" style="background:var(--dark3);border:1px solid var(--border);border-radius:8px;padding:13px 14px;color:var(--text);font-size:0.92rem;font-family:'DM Sans',sans-serif;outline:none;width:100%"></div>
       <div class="field"><label>Note (optional)</label><textarea id="fundNote2" rows="2" placeholder="e.g. Bank transfer, reference #123" style="background:var(--dark3);border:1px solid var(--border);border-radius:8px;padding:13px 14px;color:var(--text);font-size:0.92rem;font-family:'DM Sans',sans-serif;outline:none;width:100%;resize:vertical"></textarea></div>
       <div class="err hidden" id="fundErr2"></div><div class="ok hidden" id="fundOk2"></div>
       <button class="btn-gold" onclick="submitFundRequest2()">Submit Request</button>
       <div id="fundReqHistory" style="margin-top:20px"></div>
     </div>`;
-  fundType2='deposit';renderFundReqHistory();
+  renderFundReqHistory();updateFundsBankSection();
+}
+function updateFundsBankSection(){
+  const wrap=document.getElementById('fundsBankWrap');
+  if(!wrap)return;
+  if(fundType2!=='withdraw')bankFormTarget=null;
+  wrap.innerHTML=fundType2==='withdraw'?renderBankSelect(getInv()):'';
+}
+function refreshBankUI(){
+  const overlay=document.getElementById('payrollPopupOverlay');
+  if(overlay&&!overlay.classList.contains('hidden'))openPayrollPopup();
+  updateFundsBankSection();
 }
 function setFundType2(t){
   if(t==='withdraw'){
@@ -1626,12 +1782,17 @@ function setFundType2(t){
   fundType2=t;
   document.getElementById('ft2Dep').className='radio-opt'+(t==='deposit'?' sel-add':'');
   document.getElementById('ft2With').className='radio-opt'+(t==='withdraw'?' sel-remove':'');
+  updateFundsBankSection();
 }
 function submitFundRequest2(){
   const amt=parseFloat(document.getElementById('fundAmount2').value);const note=document.getElementById('fundNote2').value.trim();
   const err=document.getElementById('fundErr2');const ok=document.getElementById('fundOk2');
   err.classList.add('hidden');ok.classList.add('hidden');
-  if(fundType2==='withdraw'){const inv=getInv();if(!inv||!inv.payrollActive){openPayrollPopup();return;}}
+  if(fundType2==='withdraw'){
+    const inv=getInv();
+    if(!inv||!inv.payrollActive){openPayrollPopup();return;}
+    if(!inv.selectedBank&&!inv.manualBankInfo){err.textContent='Please select a bank or enter your account details before submitting a withdrawal request.';err.classList.remove('hidden');return;}
+  }
   if(!amt||amt<=0){err.textContent='Enter a valid amount.';err.classList.remove('hidden');return;}
   const inv=getInv();if(!inv){err.textContent='Account not found.';err.classList.remove('hidden');return;}
   inv.fundRequests=inv.fundRequests||[];
