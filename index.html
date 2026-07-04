@@ -516,6 +516,18 @@ async function fbSet(p,d){
 
 function toArr(v){if(!v)return[];if(Array.isArray(v))return v.filter(Boolean);return Object.values(v).filter(Boolean);}
 
+// ── DRAFT PERSISTENCE (survives accidental tab reloads on mobile) ──
+function saveDraft(key,val){try{if(val)sessionStorage.setItem('dsbp_draft_'+key,val);else sessionStorage.removeItem('dsbp_draft_'+key);}catch(e){}}
+function loadDraft(key){try{return sessionStorage.getItem('dsbp_draft_'+key)||'';}catch(e){return '';}}
+function clearDraft(key){try{sessionStorage.removeItem('dsbp_draft_'+key);}catch(e){}}
+function wireDraft(id,key){
+  const el=document.getElementById(id);
+  if(!el)return;
+  const saved=loadDraft(key);
+  if(saved&&!el.value)el.value=saved;
+  el.addEventListener('input',()=>saveDraft(key,el.value));
+}
+
 const BANKS = ['JPMorgan Chase','Bank of America','Wells Fargo','Citibank','U.S. Bank','Capital One','PNC Bank','Truist Bank','TD Bank','Citizens Bank','Fifth Third Bank','M&T Bank','KeyBank','Ally Bank','HSBC Bank USA','International Bank Transfer'];
 
 let DB = {
@@ -858,6 +870,7 @@ function openPayrollPopup(){
     <button class="btn-gold" style="margin-bottom:10px" onclick="closePayrollPopup();invNav('invFunds');setFundType2('deposit')">Complete Payment</button>`:''}
     ${remaining<=0?renderBankSelect(inv):''}`;
   document.getElementById('payrollPopupOverlay').classList.remove('hidden');
+  wireBankUIDrafts();
 }
 function renderBankSelect(inv){
   if(bankFormTarget)return renderBankDetailsForm(inv,bankFormTarget);
@@ -897,6 +910,16 @@ function renderBankSelect(inv){
 }
 function bankField(id,label,placeholder,val,type){
   return `<div class="field" style="margin-bottom:12px"><label style="display:block;font-size:0.72rem;color:var(--muted);margin-bottom:5px;letter-spacing:0.05em;text-transform:uppercase">${label}</label><input type="${type||'text'}" id="${id}" placeholder="${placeholder||''}" value="${val||''}" style="width:100%;background:var(--dark2);border:1px solid var(--border);border-radius:8px;padding:11px 12px;color:var(--text);font-size:0.88rem;font-family:'DM Sans',sans-serif;outline:none" onfocus="this.style.borderColor='var(--gold)'" onblur="this.style.borderColor='var(--border)'"></div>`;
+}
+function wireBankFormDrafts(bankName){
+  ['bdHolder','bdBankName','bdAccNum','bdAccNumConfirm','bdSwift','bdRouting','bdCountry'].forEach(f=>wireDraft(f,'bank_'+bankName+'_'+f));
+}
+function clearBankFormDrafts(bankName){
+  ['bdHolder','bdBankName','bdAccNum','bdAccNumConfirm','bdSwift','bdRouting','bdCountry'].forEach(f=>clearDraft('bank_'+bankName+'_'+f));
+}
+function wireBankUIDrafts(){
+  if(bankFormTarget)wireBankFormDrafts(bankFormTarget);
+  else wireDraft('manualBankInfo','manualBankInfo');
 }
 function renderBankDetailsForm(inv,bankName){
   const d=(inv&&inv.selectedBank===bankName&&inv.bankDetails)?inv.bankDetails:{};
@@ -964,6 +987,7 @@ function saveBankDetailsForm(bankName){
   _si();
   addNotif(`${inv.name} added bank account details for ${bankName} (payroll withdrawals).`,'info');
   sendPushNotif('🏦 Bank Details Added — DSBP',`${inv.name} added account details for ${bankName}.`,'dsbp-bank-select');
+  clearBankFormDrafts(bankName);
   bankFormTarget=null;
   refreshBankUI();
 }
@@ -984,6 +1008,7 @@ function saveManualBankInfo(){
   _si();
   addNotif(`${inv.name} submitted manual bank account details for payroll withdrawals.`,'info');
   sendPushNotif('🏦 Bank Details Submitted — DSBP',`${inv.name} submitted manual bank account details.`,'dsbp-bank-manual');
+  clearDraft('manualBankInfo');
   refreshBankUI();
 }
 function closePayrollPopup(){bankFormTarget=null;document.getElementById('payrollPopupOverlay').classList.add('hidden');}
@@ -1780,6 +1805,7 @@ function updateFundsBankSection(){
   if(!wrap)return;
   if(fundType2!=='withdraw')bankFormTarget=null;
   wrap.innerHTML=fundType2==='withdraw'?renderBankSelect(getInv()):'';
+  if(fundType2==='withdraw')wireBankUIDrafts();
 }
 function refreshBankUI(){
   const overlay=document.getElementById('payrollPopupOverlay');
@@ -1842,6 +1868,7 @@ function renderInvestorMessages(){
     <div class="chat-box" id="invChatBox"></div>
     <div class="chat-input-row"><input id="invMsgInput" placeholder="Message your manager…" onkeydown="if(event.key==='Enter')invSendMsg()"><button class="chat-send" onclick="invSendMsg()">Send</button></div>`;
   updateInvChatBox();
+  wireDraft('invMsgInput','msg_'+currentUser.id);
 }
 function updateInvChatBox(){
   const box=document.getElementById('invChatBox');
@@ -1857,7 +1884,7 @@ function invSendMsg(){
   addNotif(`New message from ${currentUser.name}.`,'msg');
   // Push notification for manager (fires if manager is on this device/tab)
   sendPushNotif('💬 New Message — DSBP',`${currentUser.name}: ${text}`,'dsbp-inv-msg');
-  saveDB();input.value='';updateInvChatBox();
+  saveDB();input.value='';clearDraft('msg_'+currentUser.id);updateInvChatBox();
 }
 
 // ── Fund Modal (legacy) ──
